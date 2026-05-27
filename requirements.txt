@@ -1,0 +1,6 @@
+agent-framework
+agent-framework-openai
+python-dotenv
+pydantic
+pydantic-settings
+agent-framework-devui --pre
