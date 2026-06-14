@@ -2,142 +2,183 @@
 Dentist Booking Assistant Agent
 
 AI-powered assistant for finding dentists and booking appointments.
-Provides detailed dentist profiles with specialties, experience, and availability.
 
-Usage: python agent.py
+Usage:
+python agent.py
 """
-from pathlib import Path
+
 import asyncio
 import json
-from agent_framework import Agent, tool, AgentSession
-from agent_framework.foundry import FoundryChatClient
-from azure.identity import AzureCliCredential
-from llm_config import LLMProviderConfig
-from functools import cache 
+
+from agent_framework import AgentSession
 from agent_framework.declarative import AgentFactory
+from azure.identity import AzureCliCredential
 from jinja2 import Environment, FileSystemLoader
-from agent_framework.devui import serve 
 from azure.monitor.opentelemetry import configure_azure_monitor
 from agent_framework.observability import create_resource, enable_instrumentation
 
-llmconfig = LLMProviderConfig()
-
-configure_azure_monitor(
-    connection_string=llmconfig.application_insights_connection_string,
-    resource=create_resource(),
-    enable_live_metrics=True,
+from llm_config import LLMProviderConfig
+from tools import (
+    STORE,
+    get_all_dentists,
+    lookup_patient,
+    search_available_slots,
+    book_appointment,
+    get_appointment_details,
+    cancel_booking,
+    reschedule_appointment,
+    escalate_to_human,
 )
 
-enable_instrumentation(enable_sensitive_data=True)
+
+llmconfig = LLMProviderConfig()
 
 
-@tool()
-def get_all_dentists() -> list:
-    """Return all dentist profiles loaded from the JSON data folder."""
-    return [{
-                "id": 1,
-                "name": "Dr. Jane Smith",
-                "specialty": "General Dentistry & Preventive Care",
-                "education": [
-                    "DDS - University of California, San Francisco",
-                    "Bachelor of Science in Biology - Stanford University"
-                ],
-                "years_of_experience": 12,
-                "daily_working_hours": "9:00 AM - 5:00 PM (Monday-Friday), 9:00 AM - 2:00 PM (Saturday)",
-                "strengths": [
-                    "Patient communication",
-                    "Root canal therapy",
-                    "Cosmetic dentistry",
-                    "Pediatric dentistry"
-                ],
-                "certifications": [
-                    "Board Certified - American Dental Association",
-                    "Advanced Life Support (ALS) Certified",
-                    "Invisalign Provider Certification"
-                ]
-                }
-            ]
+if llmconfig.application_insights_connection_string:
+    configure_azure_monitor(
+        connection_string=llmconfig.application_insights_connection_string,
+        resource=create_resource(),
+        enable_live_metrics=True,
+    )
+
+    enable_instrumentation(enable_sensitive_data=True)
 
 
+def load_or_create_patient_session(agent, patient_id: str) -> AgentSession:
+    """
+    Load an existing AgentSession for the patient from disk,
+    or create a new session if no saved session exists.
+    """
 
-async def main():
-      
-    # Set up Jinja2 environment
-    env = Environment(loader=FileSystemLoader('./prompts'))
+    patient_profile = STORE.get_patient_profile(patient_id)
+
+    if not patient_profile:
+        raise ValueError(f"No patient found with id {patient_id}.")
+
+    session_path = STORE.patient_session_path(patient_id)
+
+    if session_path.exists():
+        with open(session_path, "r", encoding="utf-8") as file:
+            session_dict = json.load(file)
+
+        session = AgentSession.from_dict(session_dict)
+    else:
+        session = agent.create_session()
+
+    appointments = STORE.get_patient_appointments(patient_id)
+
+    session.state["patient_id"] = patient_id
+    session.state["appointments"] = appointments
+    session.state["appointment_ids"] = [
+        appointment["appointment_id"]
+        for appointment in appointments
+    ]
+
+    STORE.save_patient_session(patient_id, session.to_dict())
+
+    return session
+
+
+def create_booking_agent():
+    """
+    Create the Dentist Booking Assistant from YAML.
+    """
+
+    env = Environment(loader=FileSystemLoader("./prompts"))
     template = env.get_template("instructions.yaml")
-    
+
     yaml_definition = template.render(
-    foundry_model=llmconfig.foundry_model, 
-    foundry_project_endpoint=llmconfig.foundry_project_endpoint, 
-    default_max_tokens=llmconfig.default_max_tokens)
+        foundry_model=llmconfig.foundry_model,
+        foundry_project_endpoint=llmconfig.foundry_project_endpoint,
+        default_max_tokens=llmconfig.default_max_tokens,
+    )
 
     factory = AgentFactory(
         client_kwargs={"credential": AzureCliCredential()},
-        bindings={"get_all_dentists": get_all_dentists},
+        bindings={
+            "get_all_dentists": get_all_dentists,
+            "lookup_patient": lookup_patient,
+            "search_available_slots": search_available_slots,
+            "book_appointment": book_appointment,
+            "get_appointment_details": get_appointment_details,
+            "cancel_booking": cancel_booking,
+            "reschedule_appointment": reschedule_appointment,
+            "escalate_to_human": escalate_to_human,
+        },
     )
+
     agent = factory.create_agent_from_yaml(yaml_definition)
     agent.id = "booking-assistant"
 
-   
-    pid = input("Patient Id: ")
-    if pid:
-        if(file := Path(f"{pid}_session_state.json")).exists():
-            # Read the file back
-            with open(f"{pid}_session_state.json", "r") as f:
-                loaded_dict = json.load(f)
-            # Reconstitute the session using the class builder
-            session = AgentSession.from_dict(loaded_dict)
-        else:
-            session = agent.create_session()
-    else:
-        session = agent.create_session
-
-    session.state["patient_id"] = pid
-    
-    while True:
-        user_input = input("User: ")
-        if user_input.lower() in ["exit", "quit"]:
-            print("Exiting...")
-            break
-        
-        reasoning_parts = []
-        text_parts = []
-
-        async for response_stream in agent.run(
-            user_input,
-            stream=True,
-            session=session,
-            options={"reasoning": {"effort" : "medium", "summary": "concise" }}
-        ):
-            for content in response_stream.contents:
-                if content.type == "text_reasoning":
-                    reasoning_parts.append(content.text)
-                elif content.type == "text":
-                    text_parts.append(content.text)
+    return agent
 
 
-        # Print reasoning once
-        if reasoning_parts:
-            reasoning_text = "".join(reasoning_parts).strip()
-            print("\n\nReasoning:")
-            print(reasoning_text)
+async def main():
+    STORE.bootstrap()
 
-        print("\n\nFinal Answer:")
-        print("".join(text_parts).strip())
-        print("\n" + "="*50 + "\n")
-    
-    print("Conversation ended.")
-    print(session.service_session_id)
+    agent = create_booking_agent()
 
-    # Extract session state to a dictionary
-    session_dict = session.to_dict() 
+    patient_id = input("Patient Id: ").strip()
 
-    # Save the dictionary as a JSON file
-    with open(f"{pid}_session_state.json", "w") as f:
-        json.dump(session_dict, f)
+    if not patient_id:
+        print("Patient id is required for this demo.")
+        return
+
+    try:
+        session = load_or_create_patient_session(agent, patient_id)
+    except ValueError as error:
+        print(error)
+        return
+
+    print(f"\nLoaded session for patient: {patient_id}")
+    print("Type 'exit' or 'quit' to end the conversation.")
+    print("=" * 50)
+
+    try:
+        while True:
+            user_input = input("User: ").strip()
+
+            if user_input.lower() in ["exit", "quit"]:
+                print("Exiting...")
+                break
+
+            reasoning_parts = []
+            text_parts = []
+
+            async for response_stream in agent.run(
+                user_input,
+                stream=True,
+                session=session,
+                options={
+                    "reasoning": {
+                        "effort": "medium",
+                        "summary": "concise",
+                    }
+                },
+            ):
+                for content in response_stream.contents:
+                    if content.type == "text_reasoning":
+                        reasoning_parts.append(content.text)
+                    elif content.type == "text":
+                        text_parts.append(content.text)
+
+            STORE.save_patient_session(patient_id, session.to_dict())
+
+            if reasoning_parts:
+                reasoning_text = "".join(reasoning_parts).strip()
+                print("\n\nReasoning:")
+                print(reasoning_text)
+
+            print("\n\nFinal Answer:")
+            print("".join(text_parts).strip())
+            print("\n" + "=" * 50 + "\n")
+
+    finally:
+        STORE.save_patient_session(patient_id, session.to_dict())
+
+        print("Conversation ended.")
+        print(f"Session id: {session.service_session_id}")
 
 
 if __name__ == "__main__":
-    #serve(entities=[agent], auto_open=True)
     asyncio.run(main())
-    

@@ -1,0 +1,17 @@
+{
+  "E-C59F0023": {
+    "escalation_id": "E-C59F0023",
+    "patient_id": "P1001",
+    "patient_name": "Ayesha Khan",
+    "urgency_level": "urgent",
+    "escalation_reason": "Patient reports extreme pain and bleeding after tooth extraction and requests next available slot. Needs urgent clinical triage and likely same-day care.",
+    "symptoms": [
+      "extreme pain",
+      "bleeding after tooth extraction"
+    ],
+    "status": "open",
+    "created_at": "2026-06-14T11:32:43.726037+00:00",
+    "updated_at": "2026-06-14T11:32:43.726037+00:00",
+    "recommended_action": "Clinic staff should review this case as soon as possible. If the patient reports immediate danger, severe bleeding, breathing difficulty, facial swelling, trauma, or rapidly worsening symptoms, advise local emergency services immediately."
+  }
+}

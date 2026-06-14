@@ -1,0 +1,11 @@
+{
+  "A-E7EECE4B": {
+    "appointment_id": "A-E7EECE4B",
+    "slot_id": "S-1-20260701-09",
+    "dentist_id": 1,
+    "patient_id": "P1001",
+    "status": "cancelled",
+    "created_at": "2026-06-14T10:19:04.470172+00:00",
+    "updated_at": "2026-06-14T10:20:44.853343+00:00"
+  }
+}
