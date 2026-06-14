@@ -4,3 +4,7 @@ python-dotenv
 pydantic
 pydantic-settings
 agent-framework-devui --pre
+agent-framework-declarative 
+agent-framework-foundry --pre
+jinja2
+azure-monitor-opentelemetry
