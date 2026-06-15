@@ -1,8 +1,6 @@
 """
 Dentist Booking Assistant Agent
 
-AI-powered assistant for finding dentists and booking appointments.
-
 Usage:
 python agent.py
 """
@@ -25,9 +23,6 @@ from tools import (
     search_available_slots,
     book_appointment,
     get_appointment_details,
-    cancel_booking,
-    reschedule_appointment,
-    escalate_to_human,
 )
 
 
@@ -44,15 +39,30 @@ if llmconfig.application_insights_connection_string:
     enable_instrumentation(enable_sensitive_data=True)
 
 
+def refresh_session_state(
+    session: AgentSession,
+    patient_id: str,
+) -> None:
+    """
+    Refresh session state from patient files.
+
+    This is called once at startup and once at the end.
+    """
+
+    appointments = STORE.get_patient_appointments(patient_id)
+
+    session.state["patient_id"] = patient_id
+    session.state["appointments"] = appointments
+    session.state["appointment_ids"] = [
+        appointment["appointment_id"]
+        for appointment in appointments
+    ]
+
+
 def load_or_create_patient_session(agent, patient_id: str) -> AgentSession:
-    """
-    Load an existing AgentSession for the patient from disk,
-    or create a new session if no saved session exists.
-    """
+    patient = STORE.get_patient_profile(patient_id)
 
-    patient_profile = STORE.get_patient_profile(patient_id)
-
-    if not patient_profile:
+    if not patient:
         raise ValueError(f"No patient found with id {patient_id}.")
 
     session_path = STORE.patient_session_path(patient_id)
@@ -65,45 +75,42 @@ def load_or_create_patient_session(agent, patient_id: str) -> AgentSession:
     else:
         session = agent.create_session()
 
-    appointments = STORE.get_patient_appointments(patient_id)
-
-    session.state["patient_id"] = patient_id
-    session.state["appointments"] = appointments
-    session.state["appointment_ids"] = [
-        appointment["appointment_id"]
-        for appointment in appointments
-    ]
-
-    STORE.save_patient_session(patient_id, session.to_dict())
+    refresh_session_state(session, patient_id)
 
     return session
 
 
 def create_booking_agent():
-    """
-    Create the Dentist Booking Assistant from YAML.
-    """
-
     env = Environment(loader=FileSystemLoader("./prompts"))
     template = env.get_template("instructions.yaml")
 
     yaml_definition = template.render(
         tools=[
-            {"name": "get_all_dentists", "description": "retrieving dentist profiles and details"},
-            {"name": "lookup_patient", "description": "looking up patient records and details"},
-            {"name": "search_available_slots", "description": "searching for available appointment slots"},
-            {"name": "book_appointment", "description": "booking a new appointment"},
-            {"name": "get_appointment_details", "description": "retrieving details of an existing appointment"},
-            {"name": "cancel_booking", "description": "cancelling an existing appointment"},
-            {"name": "reschedule_appointment", "description": "rescheduling an existing appointment to a new slot"},
-            {"name": "escalate_to_human", "description": "escalating urgent symptoms or clinical risks to clinic staff"},
+            {
+                "name": "get_all_dentists",
+                "description": "retrieving dentist profiles and details",
+            },
+            {
+                "name": "lookup_patient",
+                "description": "looking up patient records and saved appointments",
+            },
+            {
+                "name": "search_available_slots",
+                "description": "searching for available appointment slots",
+            },
+            {
+                "name": "book_appointment",
+                "description": "booking a new appointment",
+            },
+            {
+                "name": "get_appointment_details",
+                "description": "retrieving details for a booked appointment",
+            },
         ],
         foundry_model=llmconfig.foundry_model,
         foundry_project_endpoint=llmconfig.foundry_project_endpoint,
         default_max_tokens=llmconfig.default_max_tokens,
     )
-
-    print(yaml_definition)
 
     factory = AgentFactory(
         client_kwargs={"credential": AzureCliCredential()},
@@ -113,9 +120,6 @@ def create_booking_agent():
             "search_available_slots": search_available_slots,
             "book_appointment": book_appointment,
             "get_appointment_details": get_appointment_details,
-            "cancel_booking": cancel_booking,
-            "reschedule_appointment": reschedule_appointment,
-            "escalate_to_human": escalate_to_human,
         },
     )
 
@@ -157,8 +161,19 @@ async def main():
             reasoning_parts = []
             text_parts = []
 
+            agent_input = f"""
+                            Current patient context:
+                            - patient_id: {patient_id}
+
+                            When the user says "my", "me", or "my profile", use this patient id.
+                            Do not ask for the patient id again unless it is missing.
+
+                            User request:
+                            {user_input}
+                            """
+            
             async for response_stream in agent.run(
-                user_input,
+                agent_input,
                 stream=True,
                 session=session,
                 options={
@@ -174,18 +189,16 @@ async def main():
                     elif content.type == "text":
                         text_parts.append(content.text)
 
-            STORE.save_patient_session(patient_id, session.to_dict())
-
             if reasoning_parts:
-                reasoning_text = "".join(reasoning_parts).strip()
                 print("\n\nReasoning:")
-                print(reasoning_text)
+                print("".join(reasoning_parts).strip())
 
             print("\n\nFinal Answer:")
             print("".join(text_parts).strip())
             print("\n" + "=" * 50 + "\n")
 
     finally:
+        refresh_session_state(session, patient_id)
         STORE.save_patient_session(patient_id, session.to_dict())
 
         print("Conversation ended.")
