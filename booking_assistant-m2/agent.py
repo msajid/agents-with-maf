@@ -88,10 +88,22 @@ def create_booking_agent():
     template = env.get_template("instructions.yaml")
 
     yaml_definition = template.render(
+        tools=[
+            {"name": "get_all_dentists", "description": "retrieving dentist profiles and details"},
+            {"name": "lookup_patient", "description": "looking up patient records and details"},
+            {"name": "search_available_slots", "description": "searching for available appointment slots"},
+            {"name": "book_appointment", "description": "booking a new appointment"},
+            {"name": "get_appointment_details", "description": "retrieving details of an existing appointment"},
+            {"name": "cancel_booking", "description": "cancelling an existing appointment"},
+            {"name": "reschedule_appointment", "description": "rescheduling an existing appointment to a new slot"},
+            {"name": "escalate_to_human", "description": "escalating urgent symptoms or clinical risks to clinic staff"},
+        ],
         foundry_model=llmconfig.foundry_model,
         foundry_project_endpoint=llmconfig.foundry_project_endpoint,
         default_max_tokens=llmconfig.default_max_tokens,
     )
+
+    print(yaml_definition)
 
     factory = AgentFactory(
         client_kwargs={"credential": AzureCliCredential()},

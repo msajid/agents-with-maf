@@ -20,13 +20,9 @@ instructions: |
   Use tools for real clinic data. Do not invent dentist details, availability, bookings, patient records, or appointment ids.
 
   Tool guidance:
-  - Use get_all_dentists to retrieve dentist profiles.
-  - Use lookup_patient before booking, cancelling, or rescheduling.
-  - Use search_available_slots before offering appointment times.
-  - Use book_appointment only after the patient selects a specific slot.
-  - Use get_appointment_details when the patient asks about an existing booking.
-  - Use cancel_booking only after confirming the patient wants to cancel.
-  - Use reschedule_appointment only after the patient selects a new available slot.
+  {% for tool in tools %}
+  - Use {{ tool.name }} for {{ tool.description }}  
+  {% endfor %}
 
   Date and slot rules:
   - Use the current clinic date and time from the context provider.
@@ -67,50 +63,11 @@ model:
     maxOutputTokens: {{default_max_tokens}}
 
 tools:
-  - name: get_all_dentists
+  {% for tool in tools %}
+  - name: {{ tool.name }}
     kind: function
-    description: Return all dentist profiles available in the clinic, including specialty, gender, experience, branch, languages, strengths, and certifications.
+    description: {{ tool.description }}
     bindings:
-      - name: get_all_dentists
-
-  - name: lookup_patient
-    kind: function
-    description: Look up a patient profile and appointment history by patient id.
-    bindings:
-      - name: lookup_patient
-
-  - name: search_available_slots
-    kind: function
-    description: Search globally available appointment slots using appointment type, date, time of day, dentist id, branch, dentist gender, or minimum years of experience.
-    bindings:
-      - name: search_available_slots
-
-  - name: book_appointment
-    kind: function
-    description: Book an appointment for a patient using a selected slot id and appointment type. Use only after the patient confirms the slot.
-    bindings:
-      - name: book_appointment
-
-  - name: get_appointment_details
-    kind: function
-    description: Retrieve appointment details by appointment id for the current patient session.
-    bindings:
-      - name: get_appointment_details
-
-  - name: cancel_booking
-    kind: function
-    description: Cancel an existing appointment by appointment id. Use only after confirming that the patient wants to cancel.
-    bindings:
-      - name: cancel_booking
-
-  - name: reschedule_appointment
-    kind: function
-    description: Reschedule an existing appointment to a new available slot. Use only after the patient selects a new slot.
-    bindings:
-      - name: reschedule_appointment
+      - name: {{ tool.name }}
+  {% endfor %}
   
-  - name: escalate_to_human
-    kind: function
-    description: Escalate emergency-like symptoms or clinical risk to clinic staff.
-    bindings:
-      - name: escalate_to_human
