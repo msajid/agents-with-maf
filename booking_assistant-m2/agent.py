@@ -140,12 +140,8 @@ async def main():
         print("Patient id is required for this demo.")
         return
 
-    try:
-        session = load_or_create_patient_session(agent, patient_id)
-    except ValueError as error:
-        print(error)
-        return
-
+    session = load_or_create_patient_session(agent, patient_id)
+    
     print(f"\nLoaded session for patient: {patient_id}")
     print("Type 'exit' or 'quit' to end the conversation.")
     print("=" * 50)
